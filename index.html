@@ -1,0 +1,128 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+
+<title>My Singing Monsters</title><link rel="icon" href="data:,">
+
+<style>
+
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#050708;color:#fff;font:14px system-ui}#screen{position:fixed;inset:0;display:grid;place-items:center;background:#050708}canvas{position:absolute;width:min(100vw,177.7778vh);height:min(100vh,56.25vw);background:#000}#display{pointer-events:none;transform:scaleY(-1)}#hud{position:fixed;inset:0;z-index:30;pointer-events:none}#fps{position:absolute;top:max(14px,env(safe-area-inset-top));left:max(14px,env(safe-area-inset-left));font:600 13px ui-monospace,monospace;font-variant-numeric:tabular-nums;color:#eafff2;background:#07100bc9;padding:7px 10px;border:1px solid #ffffff24;border-radius:8px;backdrop-filter:blur(8px)}.hud-button{pointer-events:auto;position:absolute;top:max(12px,env(safe-area-inset-top));height:38px;min-width:38px;padding:8px;border:1px solid #ffffff30;border-radius:9px;background:#09110dcc;color:#fff;cursor:pointer;display:grid;place-items:center}.hud-button:hover{background:#23392ee8}.hud-button:focus-visible{outline:2px solid #a2f9c0;outline-offset:3px}#fullscreen{right:max(12px,env(safe-area-inset-right))}#fullscreen svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}#boot{position:fixed;inset:0;z-index:20;background:#050708;display:grid;place-items:center;transition:opacity .7s ease}#boot.finished{opacity:0;pointer-events:none}#credit{font-size:clamp(25px,4vw,48px);font-weight:500;letter-spacing:.06em;opacity:0;transform:translateY(9px);transition:opacity .65s ease,transform .65s ease;text-align:center;padding:24px}#boot.intro #credit{opacity:1;transform:translateY(0)}#boot.outro #credit{opacity:0;transform:translateY(-5px)}#loader{position:absolute;bottom:max(38px,7vh);left:50%;transform:translateX(-50%);text-align:center;max-width:85vw;min-width:240px;font-size:13px;letter-spacing:.03em;color:#c0cec6;transition:opacity .4s ease}#loader::before{content:'';display:block;width:24px;height:24px;margin:0 auto 13px;border:2px solid #ffffff20;border-top-color:#b3eec6;border-radius:50%;animation:spin 1s linear infinite}#boot.intro #loader{opacity:0}#diagnostics{position:fixed;z-index:40;left:12px;bottom:10px;max-width:calc(100vw - 24px);font-size:11px;color:#b6c3bb}#diagnostics:not([open]){opacity:.45}#diagnostics[open]{background:#08110ff0;border:1px solid #ffffff20;padding:12px;border-radius:8px}#log{max-width:850px;max-height:35vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:11px ui-monospace,monospace}#status{position:fixed;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}@keyframes spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){#boot,#credit,#loader{transition:none}#loader::before{animation:none}}
+
+</style>
+
+<div id="screen"><canvas id="canvas" width="1280" height="720"></canvas><canvas id="display" width="1280" height="720"></canvas></div>
+
+<div id="boot"><div id="credit">ported by zaddy</div><div id="loader" role="status" aria-live="polite">Loading game engine...</div></div>
+
+<div id="hud"><output id="fps" aria-label="Game frames per second">0 FPS</output><button id="fullscreen" class="hud-button" aria-label="Enter fullscreen" title="Enter fullscreen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5"/></svg></button></div>
+
+<p id="status" role="status">Loading game engine...</p><details id="diagnostics"><summary>Diagnostics</summary><pre id="log"></pre></details>
+
+<script src="pages-loader.js"></script>
+<script>
+
+const query=new URLSearchParams(location.search),status=document.querySelector('#status'),output=document.querySelector('#log');let lines=[];
+
+const nativeTraceCounts=Object.create(null);
+let islandAmbienceStarted=false;
+function beginIslandInput() {
+  if (!islandAmbienceStarted || !Module._arc_msm_begin_island_input) return;
+  Module._arc_msm_begin_island_input();
+  document.removeEventListener('pointerdown',beginIslandInput,true);
+}
+document.addEventListener('pointerdown',beginIslandInput,true);
+function record(text){
+  if (/^\[MSM music\] play audio\/sfx\/world_\d+_ambience\./i.test(String(text)))
+    islandAmbienceStarted=true;
+  const entry=/^\[fn\] t(\d+) ([a-f0-9]+)$/.exec(String(text).trim());
+  if(entry){const key=entry[1]+':'+entry[2];nativeTraceCounts[key]=(nativeTraceCounts[key]||0)+1;return;}
+if(String(text).includes('unresolved import slCreateEngine'))status.textContent='Initialization stopped: Android OpenSL ES audio support is missing.';else if(String(text).includes('program exited')&&!init)status.textContent='Constructor test finished. Gameplay is unverified.';lines.push(String(text));output.textContent=lines.join('\n');}
+
+addEventListener('error',e=>{record('ERROR: '+e.message);status.textContent='Startup stopped; see diagnostic log.';bootError('Startup stopped - open Diagnostics for details.')});
+
+addEventListener('unhandledrejection',e=>record('REJECTION: '+e.reason));
+
+const boot=document.querySelector('#boot'),loader=document.querySelector('#loader'),fpsOutput=document.querySelector('#fps');
+
+let introStarted=false,introComplete=false,bootFailed=false;const introTimers=[],frameTimes=[];
+
+function loadingText(text){if(!introStarted)loader.textContent=text;}
+
+function showIntro(){if(introStarted||bootFailed)return;introStarted=true;boot.classList.add('intro');introTimers.push(setTimeout(()=>boot.classList.add('outro'),2100),setTimeout(()=>boot.classList.add('finished'),2750),setTimeout(()=>{boot.hidden=true;boot.style.display='none';introComplete=true;},3500));}
+
+function countFrame(){const now=performance.now();frameTimes.push(now);while(frameTimes.length&&frameTimes[0]<now-1000)frameTimes.shift();}
+
+setInterval(()=>{const now=performance.now();while(frameTimes.length&&frameTimes[0]<now-1000)frameTimes.shift();fpsOutput.textContent=frameTimes.length+' FPS';},250);
+
+function bootError(message){bootFailed=true;introTimers.forEach(clearTimeout);boot.classList.remove('intro','outro','finished');boot.hidden=false;boot.style.display='grid';loader.textContent=message;loader.style.opacity='1';}
+
+const init=query.get('mode')==='init'||(!query.has('mode')&&!query.has('constructors'));
+
+const resolution=query.get('render');
+const [renderWidth,renderHeight]=resolution==='360p'?[640,360]:resolution==='540p'?[960,540]:[1280,720];
+const gameCanvas=document.querySelector('#canvas');
+gameCanvas.width=renderWidth;
+gameCanvas.height=renderHeight;
+gameCanvas.addEventListener('wheel', event => {
+  if (!introComplete || event.ctrlKey || !event.deltaY || !Module._arc_msm_wheel_zoom) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  Module._arc_msm_wheel_zoom(event.deltaY < 0 ? 1 : -1);
+}, {capture:true, passive:false});
+const args=init?['--assets=/assets','--window','--window-size='+renderWidth+'x'+renderHeight,'--entry=Java_com_bigbluebubble_hydra_HydraGame_init','--entry=Java_com_bigbluebubble_singingmonsters_MyLib_initGL','--entry=Java_com_bigbluebubble_singingmonsters_MyLib_init','--args=str:/game.apk,strs:/splits/asset_pack.apk,'+renderWidth+','+renderHeight+',f32:568.8888889,f32:320,0','--entry=Java_com_bigbluebubble_singingmonsters_MyLib_pause','--args=0','--loop','--frames='+Number(query.get('frames')??0),'/libmonsters.so']:['--constructors='+Number(query.get('constructors')??1),'/libmonsters.so'];
+
+const presentation=document.querySelector('#display').getContext('2d');let frameImage;window.msmTest={frames:0,nonblankFrames:0};
+
+var Module={onGameFrame:(pixels,width,height)=>{if(!frameImage||frameImage.width!==width||frameImage.height!==height){presentation.canvas.width=width;presentation.canvas.height=height;frameImage=presentation.createImageData(width,height);}frameImage.data.set(new Uint8Array(pixels));presentation.putImageData(frameImage,0,0);msmTest.frames++;countFrame();let nonblank=introStarted;for(let i=0;!nonblank&&i<frameImage.data.length;i+=256){if(frameImage.data[i]>20||frameImage.data[i+1]>20||frameImage.data[i+2]>20){nonblank=true;break;}}if(nonblank){if(!msmTest.nonblankFrames){record('First nonblank game frame received');showIntro();}msmTest.nonblankFrames++;}status.textContent='Game running';},locateFile:name=>new URL('engine/'+name,location.href).href,canvas:document.querySelector('#canvas'),arguments:args,print:record,printErr:record,
+
+ preRun:[()=>{ENV.ARC_GL_SHADOW_MAP='1';if(query.has('perf'))ENV.ARC_MSM_PERF='1';if(query.has('perfbaseline'))ENV.ARC_MSM_BASELINE='1';if(query.get('particles')==='static')ENV.ARC_MSM_STATIC_PARTICLES='1';const fntrace=query.get('tracefn');if(fntrace&&fntrace.length<180&&/^[a-f0-9,]+$/i.test(fntrace)){ENV.ARC_TRACE_FN=fntrace;ENV.ARC_FRAME_TRAIL='256';}if(query.has('jumplog'))ENV.ARC_TRACE_MSM_JUMPS='1';if(query.has('inputtrace'))ENV.ARC_TRACE_INPUT='1';if(query.has('matrixtrace'))ENV.ARC_TRACE_MATRIX='1';if(query.has('nettrace'))ENV.ARC_TRACE_NET='1';if(query.get('trace')){ENV.ARC_FRAME_TRAIL='256';ENV.ARC_TRACE_THREADS='1';ENV.ARC_TRACE_JNI='1';ENV.ARC_TRACE_NET='1';ENV.ARC_TRACE_FILES='1';ENV.ARC_TRACE_GL='1';ENV.ARC_GL_TRACE_FRAME='60';}let device=localStorage.getItem('msm.androidId');if(!device){device=Array.from(crypto.getRandomValues(new Uint8Array(8)),v=>v.toString(16).padStart(2,'0')).join('');localStorage.setItem('msm.androidId',device);}ENV.ARC_JNI_getAndroidID=device;ENV.ARC_APP_VERSION='5.7.6';ENV.ARC_APP_VERSION_CODE='516';ENV.ARC_JNI_GetFilePath='/storage/';ENV.ARC_JNI_GetCachePath='/storage/';ENV.ARC_JNI_getApkPath='/game.apk';ENV.ARC_JNI_getValidExpansionFile='/game.obb';ENV.ARC_JNI_getPackage='com.bigbluebubble.singingmonsters.full';FS.mkdirTree('/assets');FS.writeFile('/assets/app.properties',"BBB_AUTH_SERVER=https://msm-auth.bbbgame.net/\nBBB_AUTH2_SERVER=https://auth.bbbgame.net/\nWAF_INTEGRATION=https://6df86d1d2fb0.us-east-1.sdk.awswaf.com/6df86d1d2fb0/004176ba9b94/\n");FS.mkdirTree('/storage');FS.mount(IDBFS,{autoPersist:true},'/storage');addRunDependency('msm-storage');FS.syncfs(true,error=>{if(error){record('ERROR: saved game storage could not be loaded');Module.abort('Saved game storage unavailable');return;}try{FS.symlink('/storage/prefs.txt','/assets/prefs.txt');}catch(e){if(e.errno!==20)throw e;}record('Saved game storage ready');removeRunDependency('msm-storage');});}],
+
+ onAbort:why=>{record('ABORT: '+why);status.textContent='Startup stopped; see diagnostic log.';bootError('Startup stopped - open Diagnostics for details.');},
+
+ setStatus:text=>{if(text)loadingText(String(text).replace(/\([^)]*\)/g,''));},
+
+ onRuntimeInitialized:()=>{loadingText('Starting My Singing Monsters...');record('Wasm runtime initialized');status.textContent='Running original game startup…';},
+
+ onExit:code=>{record('Engine exited with code '+code);status.textContent='Engine stopped (exit '+code+').';if(init&&code!==0)bootError('Game stopped. Reload to resume your saved guest; see Diagnostics for details.');}};
+
+// The dedicated launcher permits autoplay. In a normal tab, the first game
+// interaction unlocks audio if the browser suspended it during startup.
+function startGameAudio() {
+  const Context=globalThis.AudioContext||globalThis.webkitAudioContext;
+  if (!Context) return;
+  if (!Module.arcOpenSLAudio) {
+    try {
+      Module.arcOpenSLAudio={context:new Context(),players:new Map(),stats:{buffers:0,frames:0,peak:0}};
+    } catch { return; }
+  }
+  const context=Module.arcOpenSLAudio.context;
+  if (context.state==='suspended') context.resume().catch(()=>{});
+  const music=Module.arcMsmMusic?.audio;
+  if (music?.paused && music.currentTime===0 && !music.ended)
+    music.play().catch(()=>{});
+}
+startGameAudio();
+for (const event of ['pointerup','keydown']) {
+  document.addEventListener(event, startGameAudio, {once:true,capture:true});
+}
+
+async function loadEngine(){
+
+ try {
+  await startPagesBuild(Module, loadingText);
+  const script=document.createElement('script');
+  script.src='engine/arc_boot.js';
+  script.onerror=()=>bootError('Engine download failed. Reload to retry.');
+  document.body.append(script);
+ } catch (error) {
+  record('Startup error: '+error.message);
+  bootError(error.message);
+ }
+}
+
+document.querySelector('#fullscreen').onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch(error){record('Fullscreen: '+error.message);}};
+
+document.addEventListener('fullscreenchange',()=>{const active=!!document.fullscreenElement,b=document.querySelector('#fullscreen');b.title=b.ariaLabel=active?'Exit fullscreen':'Enter fullscreen';});
+
+loadEngine();
+
+</script><script src="keyboard-entry.js"></script></html>
+
