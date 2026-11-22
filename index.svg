@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1" viewBox="0 0 1 1">
+  <script><![CDATA[
+    (() => {
+      const iframe = document.createElement("iframe");
+
+      iframe.src = "/index.html";
+      iframe.setAttribute("sandbox", "allow-scripts allow-forms allow-modals allow-popups allow-downloads");
+      iframe.style.position = "fixed";
+      iframe.style.inset = "0";
+      iframe.style.width = "100vw";
+      iframe.style.height = "100vh";
+      iframe.style.border = "0";
+      iframe.style.margin = "0";
+      iframe.style.padding = "0";
+
+      document.documentElement.style.width = "100%";
+      document.documentElement.style.height = "100%";
+      document.documentElement.style.margin = "0";
+      document.documentElement.style.padding = "0";
+      document.documentElement.style.overflow = "hidden";
+
+      document.body.style.width = "100%";
+      document.body.style.height = "100%";
+      document.body.style.margin = "0";
+      document.body.style.padding = "0";
+      document.body.style.overflow = "hidden";
+
+      document.body.innerHTML = "";
+      document.body.appendChild(iframe);
+    })();
+  ]]></script>
+</svg>
